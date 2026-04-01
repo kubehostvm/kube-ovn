@@ -1302,7 +1302,18 @@ func (c *Controller) generateNatOutgoingPolicyChainRules(protocol string) ([]uti
 // errors (e.g. when referenced ipsets don't exist, causing iptables -C to fail).
 // This is used during non-primary CNI cleanup where rules may never have been created.
 func bestEffortDeleteIptablesRule(ipt *iptables.IPTables, rule util.IPTableRule) {
-	if err := deleteIptablesRule(ipt, rule); err != nil {
+	// If the chain does not exist, the rule was never installed; skip silently.
+	if exists, err := ipt.ChainExists(rule.Table, rule.Chain); err != nil || !exists {
+		return
+	}
+	// ipt.Exists may return an error when the rule references a target chain that
+	// does not exist (exit status 2). Treat any such failure as "rule not present".
+	exists, err := ipt.Exists(rule.Table, rule.Chain, rule.Rule...)
+	if err != nil || !exists {
+		klog.V(3).Infof("skipping best-effort iptables rule cleanup (not present) %v: %v", rule, err)
+		return
+	}
+	if err = ipt.Delete(rule.Table, rule.Chain, rule.Rule...); err != nil {
 		klog.V(3).Infof("ignoring error during best-effort iptables rule cleanup %v: %v", rule, err)
 	}
 }
